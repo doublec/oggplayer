@@ -1,0 +1,21 @@
+[submodule "thirdparty/libogg"]
+	path = thirdparty/libogg
+	url = git://bluishcoder.co.nz/git/libogg.git
+[submodule "thirdparty/libvorbis"]
+	path = thirdparty/libvorbis
+	url = git://bluishcoder.co.nz/git/libvorbis.git
+[submodule "thirdparty/libtheora"]
+	path = thirdparty/libtheora
+	url = git://bluishcoder.co.nz/git/libtheora.git
+[submodule "thirdparty/libfishsound"]
+	path = thirdparty/libfishsound
+	url = git://bluishcoder.co.nz/git/libfishsound.git
+[submodule "thirdparty/liboggplay"]
+	path = thirdparty/liboggplay
+	url = git://bluishcoder.co.nz/git/liboggplay.git
+[submodule "thirdparty/libsydneyaudio"]
+	path = thirdparty/libsydneyaudio
+	url = git://bluishcoder.co.nz/git/libsydneyaudio.git
+[submodule "thirdparty/liboggz"]
+	path = thirdparty/liboggz
+	url = git://bluishcoder.co.nz/git/liboggz.git

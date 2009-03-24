@@ -1,0 +1,88 @@
+Overview
+========
+
+oggplayer is an example of using the liboggplay API to write a simple video/audio player. It plays
+audio and video stored in an Ogg container and will eventually support all the formats that
+OggPlay suports. The intent is to use it as a test application for using liboggplay.
+
+License
+=======
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+DEVELOPERS AND CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Build
+=====
+The build setup works under Linux. You'll need to change the makefile to
+build on Mac OS X to link against the Mac audio libraries instead of
+Alsa. On Windows I'm unsure what changes are needed. I'll look into this
+later.
+
+oggplayer requires a number of third party libraries. These include:
+
+  libogg
+  libvorbis
+  libtheora
+  liboggz
+  libfishsound
+  libsydneyaudio
+  liboggplay
+  Boost C++ libraries
+
+In some cases it requires the latest svn versions of the Ogg libraries. To make
+things easier (for me) I've added git submodules for these libraries and I
+statically link to them. I use my own git mirrors for the submodules.
+
+When you first clone this repository you need to pull the submodules:
+
+$ git clone git://github.com/doublec/oggplayer
+$ git submodule init
+$ git submodule update
+
+To configure and build the third party libraries, change to the 'thirdparty'
+subdirectory and run 'build.sh'.
+
+After that run 'make' in the root of the oggplayer directory to build:
+
+$ cd thirdparty
+$ sh build.sh
+$ cd ..
+$ make
+
+Running
+=======
+Pass the name of the ogg file you want to play on the command line:
+
+$ ./oggplayer music.ogg
+
+Why
+===
+Why write this? Mainly to provide another program that uses the same libraries
+as the Firefox media playback support. This allows me to test and track down
+bugs a bit easier. I've also followed a similar approach to the way Firefox does
+the decoding loop so I can track down a/v sync and other issues.
+
+Feedback
+========
+I host this on githib:
+  http://github.com/doublec/oggplayer/tree/master
+
+Feel free to clone, hack away, suggest patches, etc. I can be reached
+via email: chris.double@double.co.nz

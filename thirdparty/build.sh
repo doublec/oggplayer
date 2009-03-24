@@ -1,4 +1,4 @@
-PREFIX=/home/chris/src/oggplayer
+PREFIX=`pwd`/..
 cd libogg
 ./autogen.sh
 ./configure --prefix=$PREFIX/local --disable-shared --enable-static
@@ -11,8 +11,8 @@ cd ../libtheora
 ./autogen.sh
 ./configure --prefix=$PREFIX/local --with-ogg=$PREFIX/local --with-vorbis=$PREFIX/local --disable-shared --enable-static
 make && make install
-cd liboggz
-./autogensh
+cd ../liboggz
+./autogen.sh
 ./configure --prefix=$PREFIX/local --with-ogg=$PREFIX/local --disable-shared --enable-static
 make && make install
 cd ../libfishsound
@@ -23,5 +23,8 @@ cd ../liboggplay
 ./autogen.sh
 OGGZ_CFLAGS=-I$PREFIX/local/include OGGZ_LIBS="-L$PREFIX/lib -loggz" VORBIS_CFLAGS=-I$PREFIX/local/include VORBIS_LIBS="-L$PREFIX/lib -lvorbis" THEORA=-I$PREFIX/local/include THEORA="-L$PREFIX/lib -ltheora" FISHSOUND=-I$PREFIX/local/include FISHSOUND="-L$PREFIX/lib -lfishsound" ./configure --prefix=$PREFIX/local --disable-speex --disable-shared --enable-static
 make && make install
+cd ../libsydneyaudio
+./autogen.sh
+./configure --prefix=$PREFIX/local --disable-shared --enable-static --with-alsa
+make && make install
 cd ..
-
