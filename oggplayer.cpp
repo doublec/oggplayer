@@ -10,6 +10,7 @@
 #include <oggplay/oggplay_tools.h>
 #include <boost/shared_ptr.hpp>
 #include <boost/scoped_array.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 #include <SDL/SDL.h>
 
 extern "C" {
@@ -18,6 +19,7 @@ extern "C" {
 
 using namespace std;
 using namespace boost;
+using namespace boost::posix_time;
 
 // Helper function to make creating and assigning shared pointers less verbose
 template <class T>
@@ -126,6 +128,10 @@ shared_ptr<Track> handle_vorbis_metadata(shared_ptr<OggPlay> player, int index) 
   assert(r == E_OGGPLAY_OK);
   r = oggplay_get_audio_channels(player.get(), index, &channels);
   assert(r == E_OGGPLAY_OK);
+
+  // What does this do??? Seems to be needed for audio to sync with system clock
+  // and the value comes from the oggplay examples.
+  oggplay_set_offset(player.get(), index, 250);
 
   return msp(new VorbisTrack(player,index, rate, channels));
 }
@@ -312,6 +318,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   // Event object for SDL
   SDL_Event event;
 
+  // The time that we started playing - used for synching a/v against
+  // the system clock.
+  // TODO: sync vs audio clock
+  ptime start(microsec_clock::universal_time());
+
   // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
   // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
   // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
@@ -346,11 +357,26 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     
     if (video && oggplay_callback_info_get_type(info[video->mIndex]) == OGGPLAY_YUV_VIDEO) {
       OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
-      double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
+      long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
 
-      // Note that we pass the screen by reference here to allow it to be changed if the
-      // video changes size.
-      handle_video_data(screen, video, headers[0]);
+      ptime now(microsec_clock::universal_time());
+      time_duration duration(now - start);
+      long system_ms = duration.total_milliseconds();
+      long diff = video_ms - system_ms;
+
+      cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
+      if (diff > 0) {
+        // Need to pause for a bit until it's time for the video frame to appear
+        SDL_Delay(diff);
+      }
+//      else if (diff > video->mFramerate * -1000) { // Skips frame if needed
+        // Note that we pass the screen by reference here to allow it to be changed if the
+        // video changes size.
+        handle_video_data(screen, video, headers[0]);
+//      }
+//      else {
+//       cout << "Skipping frame " << video_ms << endl;
+//      }
     }
 
     oggplay_buffer_release(player.get(), info);
