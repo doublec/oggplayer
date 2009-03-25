@@ -7,8 +7,10 @@
 #include <vector>
 #include <string>
 #include <oggplay/oggplay.h>
+#include <oggplay/oggplay_tools.h>
 #include <boost/shared_ptr.hpp>
 #include <boost/scoped_array.hpp>
+#include <SDL/SDL.h>
 
 extern "C" {
 #include <sydney_audio.h>
@@ -22,6 +24,31 @@ template <class T>
 shared_ptr<T> msp(T* t) {
   return shared_ptr<T>(t);
 }
+
+// Wrap some of the SDL functionality to help manage resources
+class SDL {
+  public:
+    SDL(unsigned long flags = 0){ 
+      int r = SDL_Init(SDL_INIT_VIDEO | flags);
+      assert(r == 0);
+    }
+
+    ~SDL() {
+      SDL_Quit();
+    }
+
+    shared_ptr<SDL_Surface> setVideoMode(int width,
+                                         int height,
+                                         unsigned long flags) {
+      return shared_ptr<SDL_Surface>(SDL_SetVideoMode(width, height, 32, flags),
+                                     SDL_FreeSurface);
+    }
+
+
+};
+
+// The SDL routines are accessible globally
+SDL gSDL;
 
 class Track {
   public:
@@ -173,11 +200,85 @@ void handle_audio_data(shared_ptr<sa_stream_t> sound, OggPlayAudioData* data, in
   assert(sr == SA_SUCCESS);
 }
 
+// Process the video data provided by liboggplay. Currently using liboggplay's
+// yuv2rgb routines to test the speed. I'll later provide a switch to use
+// SDL's routines to compare.
+void handle_video_data(shared_ptr<SDL_Surface>& screen, 
+                       shared_ptr<TheoraTrack> video, 
+                       OggPlayDataHeader* header) {
+  shared_ptr<OggPlay> player(video->mPlayer);
+  int y_width, y_height;
+  int r = oggplay_get_video_y_size(player.get(), video->mIndex, &y_width, &y_height);
+  assert(r == E_OGGPLAY_OK);
+
+  int uv_width, uv_height;
+  r = oggplay_get_video_uv_size(player.get(), video->mIndex, &uv_width, &uv_height);
+  assert(r == E_OGGPLAY_OK);
+
+  if (!screen) {
+    screen = gSDL.setVideoMode(y_width, y_height, SDL_DOUBLEBUF);
+    assert(screen);
+  }
+
+  OggPlayVideoData* data = oggplay_callback_info_get_video_data(header);
+
+  OggPlayYUVChannels yuv;
+  yuv.ptry = data->y;
+  yuv.ptru = data->u;
+  yuv.ptrv = data->v;
+  yuv.uv_width = uv_width;
+  yuv.uv_height = uv_height;
+  yuv.y_width = y_width;
+  yuv.y_height = y_height;
+
+  int size = y_width * y_height * 4;
+
+  // The array is being allocated here on each frame. Should really do this once and
+  // reallocate when it changes.
+  scoped_array<unsigned char> buffer(new unsigned char[size]);
+  assert(buffer);
+
+  OggPlayRGBChannels rgb;
+  rgb.ptro = buffer.get();
+  rgb.rgb_width = y_width;
+  rgb.rgb_height = y_height;
+
+#if SDL_BYTE_ORDER == SDL_BIG_ENDIAN
+  oggplay_yuv2argb(&yuv, &rgb);
+#else
+  oggplay_yuv2bgra(&yuv, &rgb);
+#endif
+
+  shared_ptr<SDL_Surface> rgb_surface( 
+    SDL_CreateRGBSurfaceFrom(buffer.get(),
+                             y_width,
+                             y_height,
+                             32,
+                             4 * y_width,
+                             0, 0, 0, 0),
+    SDL_FreeSurface);
+  assert(rgb_surface);
+
+  r = SDL_BlitSurface(rgb_surface.get(), 
+                      NULL,
+                      screen.get(),
+                      NULL);
+  assert(r == 0);
+
+  r = SDL_Flip(screen.get());
+  assert(r == 0);
+}
+
+
 // Play the tracks. Exits when the longest track has completed playing
 void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
   // For now we need an audio track to exist
   assert(audio);
   shared_ptr<OggPlay> player(audio->mPlayer);
+
+  // Video Surface. We delay creating it until we've decoded some of the
+  // video stream so we can get the width/height.
+  shared_ptr<SDL_Surface> screen;
 
   // Open an audio stream
   sa_stream* s;
@@ -223,6 +324,15 @@ void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
         handle_audio_data(sound, data, size * audio->mChannels);
       }
     }
+    
+    if (oggplay_callback_info_get_type(info[video->mIndex]) == OGGPLAY_YUV_VIDEO) {
+      OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
+      double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
+
+      // Note that we pass the screen by reference here to allow it to be changed if the
+      // video changes size.
+      handle_video_data(screen, video, headers[0]);
+    }
 
     oggplay_buffer_release(player.get(), info);
   } 
@@ -254,6 +364,7 @@ int main(int argc, char* argv[]) {
     video->setActive();
     oggplay_set_callback_num_frames(player.get(), video->mIndex, 1);
     cout << "  " << video->toString() << endl;
+
   }
 
   if (audio) {
@@ -263,6 +374,7 @@ int main(int argc, char* argv[]) {
 
     cout << "  " << audio->toString() << endl;
   }
+
 
   play(audio, video);
 
