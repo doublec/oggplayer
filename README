@@ -45,6 +45,7 @@ oggplayer requires a number of third party libraries. These include:
   libsydneyaudio
   liboggplay
   Boost C++ libraries
+  SDL (for video display)
 
 In some cases it requires the latest svn versions of the Ogg libraries. To make
 things easier (for me) I've added git submodules for these libraries and I
