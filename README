@@ -82,7 +82,7 @@ the decoding loop so I can track down a/v sync and other issues.
 
 Feedback
 ========
-I host this on githib:
+I host this on github:
   http://github.com/doublec/oggplayer/tree/master
 
 Feel free to clone, hack away, suggest patches, etc. I can be reached
