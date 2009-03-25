@@ -269,6 +269,18 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
   assert(r == 0);
 }
 
+// Handle any SDL events. Returning 'false' will
+// exit the play loop.
+bool handle_sdl_event(SDL_Event const& event) {
+  switch (event.type) {
+    case SDL_KEYDOWN:
+      return false;
+
+    default:
+      return true;
+  }
+}
+
 
 // Play the tracks. Exits when the longest track has completed playing
 void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
@@ -297,6 +309,9 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   int r = oggplay_use_buffer(player.get(), 20);
   assert(r == E_OGGPLAY_OK);
 
+  // Event object for SDL
+  SDL_Event event;
+
   // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
   // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
   // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
@@ -305,6 +320,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
        r == E_OGGPLAY_USER_INTERRUPT ||
        r == E_OGGPLAY_CONTINUE;
        r = oggplay_step_decoding(player.get())) {
+
+    if (SDL_PollEvent(&event) == 1)
+      if (!handle_sdl_event(event))
+        return;
+
     OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(player.get());
     if (!info)
      continue;
