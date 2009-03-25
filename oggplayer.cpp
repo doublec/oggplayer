@@ -308,7 +308,7 @@ void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
        r = oggplay_step_decoding(player.get())) {
     OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(player.get());
     if (!info)
-     return;
+     continue;
 
     int num_tracks = oggplay_get_num_tracks(player.get());
     assert(audio->mIndex < num_tracks);
