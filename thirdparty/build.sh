@@ -19,6 +19,14 @@ cd ../libfishsound
 ./autogen.sh
 OGGZ_CFLAGS=-I$PREFIX/local/include OGGZ_LIBS="-L$PREFIX/local/lib -loggz" VORBIS_CFLAGS=-I$PREFIX/local/include VORBIS_LIBS="-L$PREFIX/local/lib -lvorbis" ./configure --prefix=$PREFIX/local --disable-speex --disable-flac --disable-encode --disable-shared --enable-static
 make && make install
+cd ../libkate
+./autogen.sh
+./configure --prefix=$PREFIX/local --disable-shared --enable-static
+make && make install
+cd ../libtiger
+./autogen.sh
+./configure --prefix=$PREFIX/local --disable-shared --enable-static
+make && make install
 cd ../liboggplay
 ./autogen.sh
 OGGZ_CFLAGS=-I$PREFIX/local/include OGGZ_LIBS="-L$PREFIX/local/lib -loggz" VORBIS_CFLAGS=-I$PREFIX/local/include VORBIS_LIBS="-L$PREFIX/local/lib -lvorbis" THEORA_CFLAGS=-I$PREFIX/local/include THEORA_LIBS="-L$PREFIX/local/lib -ltheora" FISHSOUND_CFLAGS=-I$PREFIX/local/include FISHSOUND_LIBS="-L$PREFIX/local/lib -lfishsound" ./configure --prefix=$PREFIX/local --disable-speex --disable-shared --enable-static
@@ -27,4 +35,3 @@ cd ../libsydneyaudio
 ./autogen.sh
 ./configure --prefix=$PREFIX/local --disable-shared --enable-static --with-alsa
 make && make install
-cd ..
