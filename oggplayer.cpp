@@ -271,29 +271,28 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
 
 
 // Play the tracks. Exits when the longest track has completed playing
-void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
-  // For now we need an audio track to exist
-  assert(audio);
-  shared_ptr<OggPlay> player(audio->mPlayer);
-
+void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
   // Video Surface. We delay creating it until we've decoded some of the
   // video stream so we can get the width/height.
   shared_ptr<SDL_Surface> screen;
 
   // Open an audio stream
-  sa_stream* s;
-  int sr = sa_stream_create_pcm(&s,
-                                NULL,
-                                SA_MODE_WRONLY,
-                                SA_PCM_FORMAT_S16_NE,
-                                audio->mRate,
-                                audio->mChannels);
-  assert(sr == SA_SUCCESS);
-  shared_ptr<sa_stream_t> sound(s, sa_stream_destroy);
-  s = NULL;
+  shared_ptr<sa_stream_t> sound(static_cast<sa_stream_t*>(NULL), sa_stream_destroy);
 
-  sr = sa_stream_open(sound.get());
-  assert(sr == SA_SUCCESS);
+  if (audio) {
+    sa_stream_t* s;
+    int sr = sa_stream_create_pcm(&s,
+                                  NULL,
+                                  SA_MODE_WRONLY,
+                                  SA_PCM_FORMAT_S16_NE,
+                                  audio->mRate,
+                                  audio->mChannels);
+    assert(sr == SA_SUCCESS);
+    sound.reset(s, sa_stream_destroy);
+
+    sr = sa_stream_open(sound.get());
+    assert(sr == SA_SUCCESS);
+  }
 
   int r = oggplay_use_buffer(player.get(), 20);
   assert(r == E_OGGPLAY_OK);
@@ -311,10 +310,10 @@ void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
      continue;
 
     int num_tracks = oggplay_get_num_tracks(player.get());
-    assert(audio->mIndex < num_tracks);
-    assert(video->mIndex < num_tracks);
+    assert(!audio || audio && audio->mIndex < num_tracks);
+    assert(!video || video && video->mIndex < num_tracks);
 
-    if (oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
+    if (audio && oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
       OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[audio->mIndex]);
       double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
       int required = oggplay_callback_info_get_required(info[audio->mIndex]);
@@ -325,7 +324,7 @@ void play(shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
       }
     }
     
-    if (oggplay_callback_info_get_type(info[video->mIndex]) == OGGPLAY_YUV_VIDEO) {
+    if (video && oggplay_callback_info_get_type(info[video->mIndex]) == OGGPLAY_YUV_VIDEO) {
       OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
       double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
 
@@ -376,7 +375,7 @@ int main(int argc, char* argv[]) {
   }
 
 
-  play(audio, video);
+  play(player, audio, video);
 
   return 0;
 }
