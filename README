@@ -44,8 +44,12 @@ oggplayer requires a number of third party libraries. These include:
   libfishsound
   libsydneyaudio
   liboggplay
+  libkate
+  libtiger
   Boost C++ libraries
   SDL (for video display)
+  Cairo (for libkate subtitle support)
+  Pango (for libkate subtitle support)
 
 In some cases it requires the latest svn versions of the Ogg libraries. To make
 things easier (for me) I've added git submodules for these libraries and I
