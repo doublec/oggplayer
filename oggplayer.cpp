@@ -401,7 +401,10 @@ int main(int argc, char* argv[]) {
   else
     reader = oggplay_file_reader_new(argv[1]);
 
+  assert(reader);
+
   shared_ptr<OggPlay> player(oggplay_open_with_reader(reader), oggplay_close);
+  assert(player);
 
   vector<shared_ptr<Track> > tracks;
   load_metadata(player, back_inserter(tracks));
