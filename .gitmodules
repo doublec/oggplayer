@@ -19,3 +19,9 @@
 [submodule "thirdparty/liboggz"]
 	path = thirdparty/liboggz
 	url = git://bluishcoder.co.nz/git/liboggz.git
+[submodule "thirdparty/libkate"]
+	path = thirdparty/libkate
+	url = git://git.xiph.org/users/oggk/kate.git
+[submodule "thirdparty/libtiger"]
+	path = thirdparty/libtiger
+	url = git://git.xiph.org/users/oggk/tiger.git
