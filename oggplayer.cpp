@@ -103,6 +103,22 @@ class VorbisTrack : public Track {
     }
 };
 
+class KateTrack : public Track {
+  public:
+    std::string mLanguage;
+    std::string mCategory;
+
+  public:
+    KateTrack(shared_ptr<OggPlay> player, int index, const std::string &language, const std::string &category) : 
+      Track(player, OGGZ_CONTENT_KATE, index), mLanguage(language), mCategory(category) { }
+
+    virtual string toString() const {
+      ostringstream str;
+      str << mIndex << ": Kate language \"" << mLanguage << "\" category \"" << mCategory << "\"";
+      return str.str();
+    }
+};
+
 class UnknownTrack : public Track {
   public:
     UnknownTrack(shared_ptr<OggPlay> player, OggzStreamContent type, int index) : 
@@ -136,6 +152,15 @@ shared_ptr<Track> handle_vorbis_metadata(shared_ptr<OggPlay> player, int index) 
   return msp(new VorbisTrack(player,index, rate, channels));
 }
 
+shared_ptr<Track> handle_kate_metadata(shared_ptr<OggPlay> player, int index) {
+  const char *language = "", *category = "";
+  int r = oggplay_get_kate_language(player.get(), index, &language);
+  assert(r == E_OGGPLAY_OK);
+  r = oggplay_get_kate_category(player.get(), index, &category);
+  assert(r == E_OGGPLAY_OK);
+  return msp(new KateTrack(player, index, language, category));
+}
+
 shared_ptr<Track> handle_unknown_metadata(shared_ptr<OggPlay> player, OggzStreamContent type, int index) {
   return msp(new UnknownTrack(player, type, index));
 }
@@ -153,6 +178,10 @@ void load_metadata(shared_ptr<OggPlay> player, OutputIterator out) {
 
       case OGGZ_CONTENT_VORBIS:
         *out++ = handle_vorbis_metadata(player, i);
+        break;
+
+      case OGGZ_CONTENT_KATE:
+        *out++ = handle_kate_metadata(player, i);
         break;
 
       default:
@@ -186,6 +215,17 @@ shared_ptr<VorbisTrack> first_audio_track(InputIterator first, InputIterator las
       return video;
   }
   return shared_ptr<VorbisTrack>();
+}
+
+// Return the first kate track in the range of tracks
+template <class InputIterator>
+shared_ptr<KateTrack> first_kate_track(InputIterator first, InputIterator last) {
+  while (first != last) {
+    shared_ptr<KateTrack> kate(dynamic_pointer_cast<KateTrack>(*first++));
+    if (kate)
+      return kate;
+  }
+  return shared_ptr<KateTrack>();
 }
 
 // Process the audio data provided by liboggplay. 'count' is the number of
@@ -275,6 +315,47 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
   assert(r == 0);
 }
 
+// Process the RGB(A) video data provided by liboggplay.
+void handle_overlay_data(shared_ptr<SDL_Surface>& screen, 
+                       shared_ptr<TheoraTrack> video, 
+                       OggPlayDataHeader* header) {
+  shared_ptr<OggPlay> player(video->mPlayer);
+  OggPlayOverlayData* data = oggplay_callback_info_get_overlay_data(header);
+
+  int width = data->width, height = data->height;
+
+  if (!screen) {
+    screen = gSDL.setVideoMode(width, height, SDL_DOUBLEBUF);
+    assert(screen);
+  }
+
+  void *buffer = data->rgb ? data->rgb : data->rgba;
+  shared_ptr<SDL_Surface> rgb_surface( 
+    SDL_CreateRGBSurfaceFrom(buffer,
+                             width,
+                             height,
+                             32,
+                             4 * width,
+                             0, 0, 0, 0),
+    SDL_FreeSurface);
+  assert(rgb_surface);
+
+  int r = SDL_BlitSurface(rgb_surface.get(), 
+                      NULL,
+                      screen.get(),
+                      NULL);
+  assert(r == 0);
+
+  r = SDL_Flip(screen.get());
+  assert(r == 0);
+}
+
+// Process the text from a Kate stream (when not already overlaid on video).
+void handle_text_data( shared_ptr<KateTrack> kate, 
+                       OggPlayTextData* header) {
+  cout << (const char*)header << endl;
+}
+
 // Handle key events. Return 'false' to exit the
 // play loop.
 bool handle_key_press(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
@@ -300,10 +381,12 @@ bool handle_sdl_event(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
 
 
 // Play the tracks. Exits when the longest track has completed playing
-void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video) {
+void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video,
+          shared_ptr<KateTrack> kate) {
   // Video Surface. We delay creating it until we've decoded some of the
   // video stream so we can get the width/height.
   shared_ptr<SDL_Surface> screen;
+  bool have_sound = false;
 
   // Open an audio stream
   shared_ptr<sa_stream_t> sound(static_cast<sa_stream_t*>(NULL), sa_stream_destroy);
@@ -320,7 +403,13 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     sound.reset(s, sa_stream_destroy);
 
     sr = sa_stream_open(sound.get());
-    assert(sr == SA_SUCCESS);
+    //assert(sr == SA_SUCCESS);
+    if (sr == SA_SUCCESS) {
+      have_sound = true;
+    }
+    else {
+      cerr << "Failed to open sound" << endl;
+    }
   }
 
   int r = oggplay_use_buffer(player.get(), 20);
@@ -354,8 +443,9 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     int num_tracks = oggplay_get_num_tracks(player.get());
     assert(!audio || audio && audio->mIndex < num_tracks);
     assert(!video || video && video->mIndex < num_tracks);
+    assert(!kate || kate && kate->mIndex < num_tracks);
 
-    if (audio && oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
+    if (have_sound && audio && oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
       OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[audio->mIndex]);
       double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
       int required = oggplay_callback_info_get_required(info[audio->mIndex]);
@@ -366,25 +456,43 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
       }
     }
     
-    if (video && oggplay_callback_info_get_type(info[video->mIndex]) == OGGPLAY_YUV_VIDEO) {
-      OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
-      long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
+    if (video) {
+      int type = oggplay_callback_info_get_type(info[video->mIndex]);
+      if (type == OGGPLAY_YUV_VIDEO || type == OGGPLAY_RGBA_VIDEO) {
+        OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
+        long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
 
-      ptime now(microsec_clock::universal_time());
-      time_duration duration(now - start);
-      long system_ms = duration.total_milliseconds();
-      long diff = video_ms - system_ms;
+        ptime now(microsec_clock::universal_time());
+        time_duration duration(now - start);
+        long system_ms = duration.total_milliseconds();
+        long diff = video_ms - system_ms;
 
-//      cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
-      if (diff > 0) {
-        // Need to pause for a bit until it's time for the video frame to appear
-        SDL_Delay(diff);
+//        cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
+        if (diff > 0) {
+          // Need to pause for a bit until it's time for the video frame to appear
+          SDL_Delay(diff);
+        }
+        // Note that we pass the screen by reference here to allow it to be changed if the
+        // video changes size.
+        if (type == OGGPLAY_YUV_VIDEO) {
+          handle_video_data(screen, video, headers[0]);
+        }
+        else if (type == OGGPLAY_RGBA_VIDEO) {
+          handle_overlay_data(screen, video, headers[0]);
+        }
       }
-      // Note that we pass the screen by reference here to allow it to be changed if the
-      // video changes size.
-      handle_video_data(screen, video, headers[0]);
     }
 
+    if (kate && oggplay_callback_info_get_type(info[kate->mIndex]) == OGGPLAY_KATE) {
+      OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[kate->mIndex]);
+      double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
+      int required = oggplay_callback_info_get_required(info[kate->mIndex]);
+      for (int i=0; i<required;++i) {
+        OggPlayTextData* data = oggplay_callback_info_get_text_data(headers[i]);
+        handle_text_data(kate, data);
+      }
+    }
+    
     oggplay_buffer_release(player.get(), info);
   } 
 }
@@ -412,6 +520,7 @@ int main(int argc, char* argv[]) {
 
   shared_ptr<TheoraTrack> video(first_video_track(tracks.begin(), tracks.end()));
   shared_ptr<VorbisTrack> audio(first_audio_track(tracks.begin(), tracks.end()));
+  shared_ptr<KateTrack> kate(first_kate_track(tracks.begin(), tracks.end()));
 
   cout << "Using the following tracks: " << endl;
   if (video) {
@@ -429,8 +538,20 @@ int main(int argc, char* argv[]) {
     cout << "  " << audio->toString() << endl;
   }
 
+  if (kate) {
+    kate->setActive();
+    if (video) {
+      oggplay_convert_video_to_rgb(player.get(), video->mIndex, 1);
+      oggplay_overlay_kate_track_on_video(player.get(), kate->mIndex, video->mIndex);
+    }
+    if (!audio && !video)
+      oggplay_set_callback_period(player.get(), kate->mIndex, 40);
 
-  play(player, audio, video);
+    cout << "  " << kate->toString() << endl;
+  }
+
+
+  play(player, audio, video, kate);
 
   return 0;
 }
