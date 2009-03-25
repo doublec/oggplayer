@@ -364,19 +364,14 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
       long system_ms = duration.total_milliseconds();
       long diff = video_ms - system_ms;
 
-      cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
+//      cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
       if (diff > 0) {
         // Need to pause for a bit until it's time for the video frame to appear
         SDL_Delay(diff);
       }
-//      else if (diff > video->mFramerate * -1000) { // Skips frame if needed
-        // Note that we pass the screen by reference here to allow it to be changed if the
-        // video changes size.
-        handle_video_data(screen, video, headers[0]);
-//      }
-//      else {
-//       cout << "Skipping frame " << video_ms << endl;
-//      }
+      // Note that we pass the screen by reference here to allow it to be changed if the
+      // video changes size.
+      handle_video_data(screen, video, headers[0]);
     }
 
     oggplay_buffer_release(player.get(), info);
