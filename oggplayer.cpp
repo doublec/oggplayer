@@ -274,7 +274,7 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
 bool handle_sdl_event(SDL_Event const& event) {
   switch (event.type) {
     case SDL_KEYDOWN:
-      return false;
+      return (event.key.keysym.sym != SDLK_ESCAPE);
 
     default:
       return true;
