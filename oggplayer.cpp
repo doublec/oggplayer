@@ -275,12 +275,23 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
   assert(r == 0);
 }
 
+// Handle key events. Return 'false' to exit the
+// play loop.
+bool handle_key_press(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
+  if (event.key.keysym.sym == SDLK_ESCAPE)
+    return false;
+  else if(event.key.keysym.sym == SDLK_SPACE) 
+    SDL_WM_ToggleFullScreen(screen.get());
+
+  return true;
+}
+
 // Handle any SDL events. Returning 'false' will
 // exit the play loop.
-bool handle_sdl_event(SDL_Event const& event) {
+bool handle_sdl_event(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
   switch (event.type) {
     case SDL_KEYDOWN:
-      return (event.key.keysym.sym != SDLK_ESCAPE);
+      return handle_key_press(screen, event);
 
     default:
       return true;
@@ -333,7 +344,7 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
        r = oggplay_step_decoding(player.get())) {
 
     if (SDL_PollEvent(&event) == 1)
-      if (!handle_sdl_event(event))
+      if (!handle_sdl_event(screen, event))
         return;
 
     OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(player.get());
