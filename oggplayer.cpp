@@ -409,6 +409,27 @@ bool handle_sdl_event(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
   }
 }
 
+static bool completed = false;
+
+// Decoding thread. Running the decode loop in a seperate thread avoids the
+// issue where some frames take longer to decode than the time for a frame
+// to be displayed (HD video for example).
+int decode_thread(void* p) {
+  OggPlay* player = (OggPlay*)p;
+
+  // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
+  // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
+  // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
+  int r = E_OGGPLAY_TIMEOUT;
+  while (!completed &&
+         r == E_OGGPLAY_TIMEOUT ||
+         r == E_OGGPLAY_USER_INTERRUPT ||
+         r == E_OGGPLAY_CONTINUE) {
+    r = oggplay_step_decoding(player);
+  }
+  completed = true;
+  return 0;
+}
 
 // Play the tracks. Exits when the longest track has completed playing
 void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<TheoraTrack> video,
@@ -453,15 +474,16 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   // TODO: sync vs audio clock
   ptime start(microsec_clock::universal_time());
 
-  // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
-  // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
-  // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
-  for (r = oggplay_step_decoding(player.get());
-       r == E_OGGPLAY_TIMEOUT ||
-       r == E_OGGPLAY_USER_INTERRUPT ||
-       r == E_OGGPLAY_CONTINUE;
-       r = oggplay_step_decoding(player.get())) {
+  completed = false;
 
+  // Start the decoding loop in a background thread. The thread must
+  // be stopped before this function is exited so that the player
+  // object is not being used when it is deleted.
+  SDL_Thread* thread = SDL_CreateThread(decode_thread, player.get());
+  if (!thread)
+    return;
+
+  while (!completed) {
     if (SDL_PollEvent(&event) == 1)
       if (!handle_sdl_event(screen, event))
         return;
@@ -499,11 +521,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
           long system_ms = duration.total_milliseconds();
           long diff = video_ms - system_ms;
 
-//          cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
           if (diff > 0) {
             // Need to pause for a bit until it's time for the video frame to appear
             SDL_Delay(diff);
           }
+
           // Note that we pass the screen by reference here to allow it to be changed if the
           // video changes size.
           if (type == OGGPLAY_YUV_VIDEO) {
@@ -528,6 +550,14 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     
     oggplay_buffer_release(player.get(), info);
   } 
+  completed = true;
+  
+  // The decoding thread can be blocked in the call to oggplay_step_decoding.
+  // The following call will cause the thread blocked on that function to unblock
+  // and exit the decoding loop. We then join to the thread to ensure it has
+  // completed before we return so that player object can safely be deleted.
+  oggplay_prepare_for_close(player.get());
+  SDL_WaitThread(thread, NULL);
 }
 
 void usage() {
