@@ -30,12 +30,13 @@ shared_ptr<T> msp(T* t) {
 // Wrap some of the SDL functionality to help manage resources
 class SDL {
   public:
-    SDL(unsigned long flags = 0){ 
+    SDL(unsigned long flags = 0) : use_sdl_yuv(false) { 
       int r = SDL_Init(SDL_INIT_VIDEO | flags);
       assert(r == 0);
     }
 
     ~SDL() {
+      yuv_surface.reset();
       SDL_Quit();
     }
 
@@ -46,7 +47,8 @@ class SDL {
                                      SDL_FreeSurface);
     }
 
-
+  bool use_sdl_yuv;
+  shared_ptr<SDL_Overlay> yuv_surface;
 };
 
 // The SDL routines are accessible globally
@@ -135,7 +137,7 @@ shared_ptr<Track> handle_theora_metadata(shared_ptr<OggPlay> player, int index) 
   int denom, num;
   int r = oggplay_get_video_fps(player.get(), index, &denom, &num);
   assert(r == E_OGGPLAY_OK);
-  return msp(new TheoraTrack(player, index, static_cast<float>(denom) / num));
+  return msp(new TheoraTrack(player, index, static_cast<float>(num) / denom));
 }
 
 shared_ptr<Track> handle_vorbis_metadata(shared_ptr<OggPlay> player, int index) {
@@ -268,48 +270,76 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
 
   OggPlayVideoData* data = oggplay_callback_info_get_video_data(header);
 
-  OggPlayYUVChannels yuv;
-  yuv.ptry = data->y;
-  yuv.ptru = data->u;
-  yuv.ptrv = data->v;
-  yuv.uv_width = uv_width;
-  yuv.uv_height = uv_height;
-  yuv.y_width = y_width;
-  yuv.y_height = y_height;
+  if (gSDL.use_sdl_yuv) {
+    if (!gSDL.yuv_surface) {
+      gSDL.yuv_surface = shared_ptr<SDL_Overlay>(
+                                                 SDL_CreateYUVOverlay(y_width,
+                                                                      y_height,
+                                                                      SDL_YV12_OVERLAY,
+                                                                      screen.get()),
+                                                 SDL_FreeYUVOverlay);
+      assert(gSDL.yuv_surface);
+    }
 
-  int size = y_width * y_height * 4;
+    r = SDL_LockYUVOverlay(gSDL.yuv_surface.get());
+    assert(r == 0);
 
-  // The array is being allocated here on each frame. Should really do this once and
-  // reallocate when it changes.
-  scoped_array<unsigned char> buffer(new unsigned char[size]);
-  assert(buffer);
+    memcpy(gSDL.yuv_surface->pixels[0], data->y, gSDL.yuv_surface->pitches[0] * y_height);
+    memcpy(gSDL.yuv_surface->pixels[2], data->u, gSDL.yuv_surface->pitches[2] * uv_height);
+    memcpy(gSDL.yuv_surface->pixels[1], data->v, gSDL.yuv_surface->pitches[1] * uv_height);
 
-  OggPlayRGBChannels rgb;
-  rgb.ptro = buffer.get();
-  rgb.rgb_width = y_width;
-  rgb.rgb_height = y_height;
+    SDL_UnlockYUVOverlay(gSDL.yuv_surface.get());
+
+    SDL_Rect rect;
+    rect.x = 0;
+    rect.y = 0;
+    rect.w = y_width;
+    rect.h = y_height;
+    SDL_DisplayYUVOverlay(gSDL.yuv_surface.get(), &rect);
+  } else {
+    OggPlayYUVChannels yuv;
+    yuv.ptry = data->y;
+    yuv.ptru = data->u;
+    yuv.ptrv = data->v;
+    yuv.uv_width = uv_width;
+    yuv.uv_height = uv_height;
+    yuv.y_width = y_width;
+    yuv.y_height = y_height;
+
+    int size = y_width * y_height * 4;
+
+    // The array is being allocated here on each frame. Should really do this once and
+    // reallocate when it changes.
+    scoped_array<unsigned char> buffer(new unsigned char[size]);
+    assert(buffer);
+
+    OggPlayRGBChannels rgb;
+    rgb.ptro = buffer.get();
+    rgb.rgb_width = y_width;
+    rgb.rgb_height = y_height;
 
 #if SDL_BYTE_ORDER == SDL_BIG_ENDIAN
-  oggplay_yuv2argb(&yuv, &rgb);
+    oggplay_yuv2argb(&yuv, &rgb);
 #else
-  oggplay_yuv2bgra(&yuv, &rgb);
+    oggplay_yuv2bgra(&yuv, &rgb);
 #endif
 
-  shared_ptr<SDL_Surface> rgb_surface( 
-    SDL_CreateRGBSurfaceFrom(buffer.get(),
-                             y_width,
-                             y_height,
-                             32,
-                             4 * y_width,
-                             0, 0, 0, 0),
-    SDL_FreeSurface);
-  assert(rgb_surface);
+    shared_ptr<SDL_Surface> rgb_surface( 
+                                        SDL_CreateRGBSurfaceFrom(buffer.get(),
+                                                                 y_width,
+                                                                 y_height,
+                                                                 32,
+                                                                 4 * y_width,
+                                                                 0, 0, 0, 0),
+                                        SDL_FreeSurface);
+    assert(rgb_surface);
 
-  r = SDL_BlitSurface(rgb_surface.get(), 
-                      NULL,
-                      screen.get(),
-                      NULL);
-  assert(r == 0);
+    r = SDL_BlitSurface(rgb_surface.get(), 
+                        NULL,
+                        screen.get(),
+                        NULL);
+    assert(r == 0);
+  }
 
   r = SDL_Flip(screen.get());
   assert(r == 0);
@@ -497,17 +527,31 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   } 
 }
 
+void usage() {
+    cout << "Usage: oggplayer [--sdl-yuv] <filename>" << endl;
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char* argv[]) {
-  if (argc != 2) {
-    cout << "Usage: oggplayer <filename>" << endl;
-    return -1;
+  if (argc < 2) {
+    usage();
+  }
+
+  char* path = argv[1];
+  if (argc == 3) {
+    if (strcmp(argv[1], "--sdl-yuv") == 0) {
+      gSDL.use_sdl_yuv = true;
+      path = argv[2];
+    } else {
+      usage();
+    }
   }
 
   OggPlayReader* reader = 0;
-  if (strncmp(argv[1], "http://", 7) == 0) 
-    reader = oggplay_tcp_reader_new(argv[1], NULL, 0);
+  if (strncmp(path, "http://", 7) == 0) 
+    reader = oggplay_tcp_reader_new(path, NULL, 0);
   else
-    reader = oggplay_file_reader_new(argv[1]);
+    reader = oggplay_file_reader_new(path);
 
   assert(reader);
 
