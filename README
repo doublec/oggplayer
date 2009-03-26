@@ -30,10 +30,8 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Build
 =====
-The build setup works under Linux. You'll need to change the makefile to
-build on Mac OS X to link against the Mac audio libraries instead of
-Alsa. On Windows I'm unsure what changes are needed. I'll look into this
-later.
+The build setup works under Linux and Mac OS X.  On Windows I'm unsure what 
+changes are needed. I'll look into this later.
 
 oggplayer requires a number of third party libraries. These include:
 
@@ -77,6 +75,12 @@ Running
 Pass the name of the ogg file you want to play on the command line:
 
 $ ./oggplayer music.ogg
+
+You can optionally use SDL's YUV to RGB conversion code, which may
+be faster than liboggplay's depending on hardware support. To use that
+pass the '--sdl-yuv' command line option:
+
+$ ./oggplayer --sdl-yuv video.ogg
 
 Why
 ===
