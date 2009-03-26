@@ -487,28 +487,31 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     }
     
     if (video) {
-      int type = oggplay_callback_info_get_type(info[video->mIndex]);
-      if (type == OGGPLAY_YUV_VIDEO || type == OGGPLAY_RGBA_VIDEO) {
-        OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
-        long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
+      int required = oggplay_callback_info_get_required(info[video->mIndex]);
+      if (required > 0) {
+        int type = oggplay_callback_info_get_type(info[video->mIndex]);
+        if (type == OGGPLAY_YUV_VIDEO || type == OGGPLAY_RGBA_VIDEO) {
+          OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
+          long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
 
-        ptime now(microsec_clock::universal_time());
-        time_duration duration(now - start);
-        long system_ms = duration.total_milliseconds();
-        long diff = video_ms - system_ms;
+          ptime now(microsec_clock::universal_time());
+          time_duration duration(now - start);
+          long system_ms = duration.total_milliseconds();
+          long diff = video_ms - system_ms;
 
-//        cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
-        if (diff > 0) {
-          // Need to pause for a bit until it's time for the video frame to appear
-          SDL_Delay(diff);
-        }
-        // Note that we pass the screen by reference here to allow it to be changed if the
-        // video changes size.
-        if (type == OGGPLAY_YUV_VIDEO) {
-          handle_video_data(screen, video, headers[0]);
-        }
-        else if (type == OGGPLAY_RGBA_VIDEO) {
-          handle_overlay_data(screen, video, headers[0]);
+//          cout << "Video " << video_ms << " System " << system_ms << "Diff " << diff << endl;
+          if (diff > 0) {
+            // Need to pause for a bit until it's time for the video frame to appear
+            SDL_Delay(diff);
+          }
+          // Note that we pass the screen by reference here to allow it to be changed if the
+          // video changes size.
+          if (type == OGGPLAY_YUV_VIDEO) {
+            handle_video_data(screen, video, headers[0]);
+          }
+          else if (type == OGGPLAY_RGBA_VIDEO) {
+            handle_overlay_data(screen, video, headers[0]);
+          }
         }
       }
     }
