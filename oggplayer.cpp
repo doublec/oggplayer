@@ -486,7 +486,7 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   while (!completed) {
     if (SDL_PollEvent(&event) == 1)
       if (!handle_sdl_event(screen, event))
-        return;
+        break;
 
     OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(player.get());
     if (!info)
