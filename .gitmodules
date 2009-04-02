@@ -16,3 +16,12 @@
 [submodule "thirdparty/libtiger"]
 	path = thirdparty/libtiger
 	url = git://git.xiph.org/users/oggk/tiger.git
+[submodule "thirdparty/liboggz"]
+	path = thirdparty/liboggz
+	url = git://git.xiph.org/liboggz.git
+[submodule "thirdparty/libfishsound"]
+	path = thirdparty/libfishsound
+	url = git://git.xiph.org/libfishsound.git
+[submodule "thirdparty/liboggplay"]
+	path = thirdparty/liboggplay
+	url = git://git.xiph.org/liboggplay.git
