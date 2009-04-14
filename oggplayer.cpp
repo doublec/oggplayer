@@ -30,25 +30,32 @@ shared_ptr<T> msp(T* t) {
 // Wrap some of the SDL functionality to help manage resources
 class SDL {
   public:
-    SDL(unsigned long flags = 0) : use_sdl_yuv(false) { 
-      int r = SDL_Init(SDL_INIT_VIDEO | flags);
-      assert(r == 0);
+    SDL(unsigned long flags = 0) : init_flags(flags), initialized(false), use_sdl_yuv(false) { 
     }
 
     ~SDL() {
-      yuv_surface.reset();
-      SDL_Quit();
+      if (initialized) {
+        yuv_surface.reset();
+        SDL_Quit();
+      }
     }
 
     shared_ptr<SDL_Surface> setVideoMode(int width,
                                          int height,
                                          unsigned long flags) {
+      int r = SDL_Init(SDL_INIT_VIDEO | init_flags);
+      assert(r == 0);
+      initialized = true;
       return shared_ptr<SDL_Surface>(SDL_SetVideoMode(width, height, 32, flags),
                                      SDL_FreeSurface);
     }
 
-  bool use_sdl_yuv;
-  shared_ptr<SDL_Overlay> yuv_surface;
+    bool use_sdl_yuv;
+    shared_ptr<SDL_Overlay> yuv_surface;
+
+  private:
+    unsigned long init_flags;
+    bool initialized;
 };
 
 // The SDL routines are accessible globally
