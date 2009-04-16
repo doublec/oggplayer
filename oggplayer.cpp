@@ -260,7 +260,7 @@ void handle_audio_data(shared_ptr<sa_stream_t> sound, OggPlayAudioData* data, in
 // yuv2rgb routines to test the speed. I'll later provide a switch to use
 // SDL's routines to compare.
 void handle_video_data(shared_ptr<SDL_Surface>& screen, 
-                       shared_ptr<TheoraTrack> video, 
+                       shared_ptr<Track> video, 
                        OggPlayDataHeader* header) {
   shared_ptr<OggPlay> player(video->mPlayer);
   int y_width, y_height;
@@ -355,7 +355,7 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
 
 // Process the RGB(A) video data provided by liboggplay.
 void handle_overlay_data(shared_ptr<SDL_Surface>& screen, 
-                       shared_ptr<TheoraTrack> video, 
+                       shared_ptr<Track> video, 
                        OggPlayDataHeader* header) {
   shared_ptr<OggPlay> player(video->mPlayer);
   OggPlayOverlayData* data = oggplay_callback_info_get_overlay_data(header);
@@ -516,12 +516,13 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
       }
     }
     
-    if (video) {
-      int required = oggplay_callback_info_get_required(info[video->mIndex]);
+    if (video || kate) {
+      int idx = video ? video->mIndex : kate->mIndex;
+      int required = oggplay_callback_info_get_required(info[idx]);
       if (required > 0) {
-        int type = oggplay_callback_info_get_type(info[video->mIndex]);
+        int type = oggplay_callback_info_get_type(info[idx]);
         if (type == OGGPLAY_YUV_VIDEO || type == OGGPLAY_RGBA_VIDEO) {
-          OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[video->mIndex]);
+          OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[idx]);
           long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
 
           ptime now(microsec_clock::universal_time());
@@ -536,11 +537,13 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
 
           // Note that we pass the screen by reference here to allow it to be changed if the
           // video changes size.
+          shared_ptr<Track> track = video;
+          if (!track) track = kate;
           if (type == OGGPLAY_YUV_VIDEO) {
-            handle_video_data(screen, video, headers[0]);
+            handle_video_data(screen, track, headers[0]);
           }
           else if (type == OGGPLAY_RGBA_VIDEO) {
-            handle_overlay_data(screen, video, headers[0]);
+            handle_overlay_data(screen, track, headers[0]);
           }
         }
       }
@@ -658,6 +661,9 @@ int main(int argc, char* argv[]) {
     if (video) {
       oggplay_convert_video_to_rgb(player.get(), video->mIndex, 1, 0);
       oggplay_overlay_kate_track_on_video(player.get(), kate->mIndex, video->mIndex);
+    }
+    else {
+      oggplay_set_kate_tiger_rendering(player.get(), kate->mIndex, 1, 0, 640, 480);
     }
     if (!audio && !video)
       oggplay_set_callback_period(player.get(), kate->mIndex, 40);
