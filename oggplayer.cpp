@@ -2,6 +2,7 @@
 // See the license at the end of this file.
 #include <cstring>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -206,33 +207,33 @@ void dump_track(shared_ptr<Track> track) {
 
 // Return the first video track in the range of tracks
 template <class InputIterator>
-shared_ptr<TheoraTrack> first_video_track(InputIterator first, InputIterator last) {
+shared_ptr<TheoraTrack> get_video_track(int track, InputIterator first, InputIterator last) {
   while (first != last) {
     shared_ptr<TheoraTrack> video(dynamic_pointer_cast<TheoraTrack>(*first++));
     if (video)
-      return video;
+      if (!track--) return video;
   }
   return shared_ptr<TheoraTrack>();
 }
 
 // Return the first audio track in the range of tracks
 template <class InputIterator>
-shared_ptr<VorbisTrack> first_audio_track(InputIterator first, InputIterator last) {
+shared_ptr<VorbisTrack> get_audio_track(int track, InputIterator first, InputIterator last) {
   while (first != last) {
-    shared_ptr<VorbisTrack> video(dynamic_pointer_cast<VorbisTrack>(*first++));
-    if (video)
-      return video;
+    shared_ptr<VorbisTrack> audio(dynamic_pointer_cast<VorbisTrack>(*first++));
+    if (audio)
+      if (!track--) return audio;
   }
   return shared_ptr<VorbisTrack>();
 }
 
 // Return the first kate track in the range of tracks
 template <class InputIterator>
-shared_ptr<KateTrack> first_kate_track(InputIterator first, InputIterator last) {
+shared_ptr<KateTrack> get_kate_track(int track, InputIterator first, InputIterator last) {
   while (first != last) {
     shared_ptr<KateTrack> kate(dynamic_pointer_cast<KateTrack>(*first++));
     if (kate)
-      return kate;
+      if (!track--) return kate;
   }
   return shared_ptr<KateTrack>();
 }
@@ -573,18 +574,44 @@ void usage() {
 }
 
 int main(int argc, char* argv[]) {
+  int video_track = 0, audio_track = 0, kate_track = 0;
+
   if (argc < 2) {
     usage();
   }
 
-  char* path = argv[1];
-  if (argc == 3) {
-    if (strcmp(argv[1], "--sdl-yuv") == 0) {
-      gSDL.use_sdl_yuv = true;
-      path = argv[2];
-    } else {
-      usage();
+  char* path = NULL;
+  for (int n=1; n<argc; ++n) {
+    if (argv[n][0] == '-') {
+      char *end = NULL;
+      if (strcmp(argv[n], "--sdl-yuv") == 0) {
+        gSDL.use_sdl_yuv = true;
+      }
+      else if (strcmp(argv[n], "--video-track") == 0) {
+        if (n == argc-1 || (video_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      }
+      else if (strcmp(argv[n], "--audio-track") == 0) {
+        if (n == argc-1 || (audio_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      }
+      else if (strcmp(argv[n], "--kate-track") == 0) {
+        if (n == argc-1 || (kate_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      }
+      else {
+        usage();
+      }
     }
+    else {
+      if (path) {
+        cerr << "Only one stream may be specified" << endl;
+      }
+      else {
+        path = argv[n];
+      }
+    }
+  }
+
+  if (!path) {
+    usage();
   }
 
   OggPlayReader* reader = 0;
@@ -602,9 +629,9 @@ int main(int argc, char* argv[]) {
   load_metadata(player, back_inserter(tracks));
   for_each(tracks.begin(), tracks.end(), dump_track);
 
-  shared_ptr<TheoraTrack> video(first_video_track(tracks.begin(), tracks.end()));
-  shared_ptr<VorbisTrack> audio(first_audio_track(tracks.begin(), tracks.end()));
-  shared_ptr<KateTrack> kate(first_kate_track(tracks.begin(), tracks.end()));
+  shared_ptr<TheoraTrack> video(get_video_track(video_track, tracks.begin(), tracks.end()));
+  shared_ptr<VorbisTrack> audio(get_audio_track(audio_track, tracks.begin(), tracks.end()));
+  shared_ptr<KateTrack> kate(get_kate_track(kate_track, tracks.begin(), tracks.end()));
 
   cout << "Using the following tracks: " << endl;
   if (video) {
