@@ -569,7 +569,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
 }
 
 void usage() {
-    cout << "Usage: oggplayer [--sdl-yuv] <filename>" << endl;
+    cout << "Usage: oggplayer [options] <filename>" << endl;
+    cout << "  --sdl-yuv            Use SDL's YUV conversion routines" << endl;
+    cout << "  --video-track <n>    Select which video track to use (-1 to disable)" << endl;
+    cout << "  --audio-track <n>    Select which audio track to use (-1 to disable)" << endl;
+    cout << "  --kate-track <n>     Select which kate track to use (-1 to disable)" << endl;
     exit(EXIT_FAILURE);
 }
 
