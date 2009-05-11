@@ -18,6 +18,8 @@ extern "C" {
 #include <sydney_audio.h>
 }
 
+#define UNSELECTED -2
+
 using namespace std;
 using namespace boost;
 using namespace boost::posix_time;
@@ -205,37 +207,20 @@ void dump_track(shared_ptr<Track> track) {
   cout << track->toString() << endl;
 }
 
-// Return the first video track in the range of tracks
-template <class InputIterator>
-shared_ptr<TheoraTrack> get_video_track(int track, InputIterator first, InputIterator last) {
+// Return a particular track by index
+template <class TrackType, class InputIterator>
+shared_ptr<TrackType> get_track(int trackidx, InputIterator first, InputIterator last) {
   while (first != last) {
-    shared_ptr<TheoraTrack> video(dynamic_pointer_cast<TheoraTrack>(*first++));
-    if (video)
-      if (!track--) return video;
+    shared_ptr<TrackType> track(dynamic_pointer_cast<TrackType>(*first));
+    if (trackidx == UNSELECTED) {
+      if (track != 0) return track; /* unselected ? use the first one we find */
+    }
+    else if (trackidx >= 0) {
+      if (!trackidx--) return track; /* use a track by index - returns NULL if not the correct type */
+    }
+    ++first;
   }
-  return shared_ptr<TheoraTrack>();
-}
-
-// Return the first audio track in the range of tracks
-template <class InputIterator>
-shared_ptr<VorbisTrack> get_audio_track(int track, InputIterator first, InputIterator last) {
-  while (first != last) {
-    shared_ptr<VorbisTrack> audio(dynamic_pointer_cast<VorbisTrack>(*first++));
-    if (audio)
-      if (!track--) return audio;
-  }
-  return shared_ptr<VorbisTrack>();
-}
-
-// Return the first kate track in the range of tracks
-template <class InputIterator>
-shared_ptr<KateTrack> get_kate_track(int track, InputIterator first, InputIterator last) {
-  while (first != last) {
-    shared_ptr<KateTrack> kate(dynamic_pointer_cast<KateTrack>(*first++));
-    if (kate)
-      if (!track--) return kate;
-  }
-  return shared_ptr<KateTrack>();
+  return shared_ptr<TrackType>();
 }
 
 // Process the audio data provided by liboggplay. 'count' is the number of
@@ -580,8 +565,24 @@ void usage() {
     exit(EXIT_FAILURE);
 }
 
-int main(int argc, char* argv[]) {
-  int video_track = 0, audio_track = 0, kate_track = 0;
+static int parse_track_index_parameter(int argc, const char *argv[], int &n, const char *name, int &idx)
+{
+  if (strcmp(argv[n], name) == 0) {
+    if (idx == UNSELECTED) {
+      char *end = NULL;
+      if (n == argc-1 || (idx=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      if (idx < 0) idx = -1;
+    }
+    else {
+      usage();
+    }
+    return 0;
+  }
+  return 1;
+}
+
+int main(int argc, const char* argv[]) {
+  int video_track = UNSELECTED, audio_track = UNSELECTED, kate_track = UNSELECTED;
 
   if (argc < 2) {
     usage();
@@ -590,18 +591,14 @@ int main(int argc, char* argv[]) {
   char* path = NULL;
   for (int n=1; n<argc; ++n) {
     if (argv[n][0] == '-') {
-      char *end = NULL;
       if (strcmp(argv[n], "--sdl-yuv") == 0) {
         gSDL.use_sdl_yuv = true;
       }
-      else if (strcmp(argv[n], "--video-track") == 0) {
-        if (n == argc-1 || (video_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      else if (!parse_track_index_parameter(argc, argv, n, "--video-track", video_track)) {
       }
-      else if (strcmp(argv[n], "--audio-track") == 0) {
-        if (n == argc-1 || (audio_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      else if (!parse_track_index_parameter(argc, argv, n, "--audio-track", audio_track)) {
       }
-      else if (strcmp(argv[n], "--kate-track") == 0) {
-        if (n == argc-1 || (kate_track=strtol(argv[n+1], &end, 10), *end)) usage(); else ++n;
+      else if (!parse_track_index_parameter(argc, argv, n, "--kate-track", kate_track)) {
       }
       else {
         usage();
@@ -612,7 +609,7 @@ int main(int argc, char* argv[]) {
         cerr << "Only one stream may be specified" << endl;
       }
       else {
-        path = argv[n];
+        path = (char*)argv[n]; // TODO: liboggplay bug doesn't take const char*
       }
     }
   }
@@ -636,9 +633,9 @@ int main(int argc, char* argv[]) {
   load_metadata(player, back_inserter(tracks));
   for_each(tracks.begin(), tracks.end(), dump_track);
 
-  shared_ptr<TheoraTrack> video(get_video_track(video_track, tracks.begin(), tracks.end()));
-  shared_ptr<VorbisTrack> audio(get_audio_track(audio_track, tracks.begin(), tracks.end()));
-  shared_ptr<KateTrack> kate(get_kate_track(kate_track, tracks.begin(), tracks.end()));
+  shared_ptr<TheoraTrack> video(get_track<TheoraTrack>(video_track, tracks.begin(), tracks.end()));
+  shared_ptr<VorbisTrack> audio(get_track<VorbisTrack>(audio_track, tracks.begin(), tracks.end()));
+  shared_ptr<KateTrack> kate(get_track<KateTrack>(kate_track, tracks.begin(), tracks.end()));
 
   cout << "Using the following tracks: " << endl;
   if (video) {
