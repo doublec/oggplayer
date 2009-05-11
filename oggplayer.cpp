@@ -656,7 +656,7 @@ int main(int argc, char* argv[]) {
   if (kate) {
     kate->setActive();
     if (video) {
-      oggplay_convert_video_to_rgb(player.get(), video->mIndex, 1);
+      oggplay_convert_video_to_rgb(player.get(), video->mIndex, 1, 0);
       oggplay_overlay_kate_track_on_video(player.get(), kate->mIndex, video->mIndex);
     }
     if (!audio && !video)
