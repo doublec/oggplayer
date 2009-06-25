@@ -223,6 +223,255 @@ shared_ptr<TrackType> get_track(int trackidx, InputIterator first, InputIterator
   return shared_ptr<TrackType>();
 }
 
+int decode_thread(void* p);
+
+// Encapsulates the decode thread and seeking operations.
+class Decoder {
+public:
+  Decoder(shared_ptr<OggPlay> player)
+    : mThread(0),
+      mPlayer(player),
+      mCompleted(false)
+  {
+  }
+  
+  ~Decoder() {
+  }
+  
+  bool start() {
+    assert(!mThread);
+    setCompleted(false);
+    mThread = SDL_CreateThread(decode_thread, this);
+    return mThread != 0;  
+  }
+  
+  bool stop() {
+    setCompleted(true);
+    // We need to release a buffer, as oggplay_step_decode() could be blocked
+    // waiting for a free buffer.
+    OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(mPlayer.get());
+    if (info) {
+      oggplay_buffer_release(mPlayer.get(), info);
+    }
+    SDL_WaitThread(mThread, NULL);
+    mThread = 0;
+  }
+
+  OggPlay* getPlayer() {
+    return mPlayer.get();
+  }
+
+  bool isCompleted() {
+    return mCompleted;
+  }
+
+  void seek(long target) {  
+    stop();
+    oggplay_seek(mPlayer.get(), target);
+    start();
+    mJustSeeked = true;
+  }
+  
+
+  void setCompleted(bool c) {
+    mCompleted = c;
+  }
+
+  bool justSeeked() {
+    if (mJustSeeked) {
+      mJustSeeked = false;
+      return true;
+    }
+    return false;
+  }
+
+private:
+  SDL_Thread* mThread;
+  shared_ptr<OggPlay> mPlayer;
+  bool mCompleted;
+  bool mJustSeeked;
+};
+
+// Decoding thread. Running the decode loop in a seperate thread avoids the
+// issue where some frames take longer to decode than the time for a frame
+// to be displayed (HD video for example).
+int decode_thread(void* p) {
+  Decoder* d = (Decoder*)p;
+  OggPlay* player = d->getPlayer();
+
+  // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
+  // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
+  // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
+  int r = E_OGGPLAY_TIMEOUT;
+  while (!d->isCompleted() &&
+         (r == E_OGGPLAY_TIMEOUT ||
+         r == E_OGGPLAY_USER_INTERRUPT ||
+         r == E_OGGPLAY_CONTINUE)) {
+    r = oggplay_step_decoding(player);
+  }
+  d->setCompleted(true);
+  return 0;
+}
+
+// Displays onscreen a bar which indicates how far through the media playback
+// has reached. You can click on the seek bar to seek. Seek bar is visible when
+// the mouse hovers over it, or for a number of seconds after last mouse motion.
+class SeekBar {
+public:
+  SeekBar(shared_ptr<OggPlay> player,
+          Decoder& decoder,
+          time_duration visibleDuration,
+          int height,
+          int padding,
+          int border)
+    : mPlayer(player),
+      mDecoder(decoder),
+      mStartTimeMs(0),
+      mEndTimeMs(-1),
+      mCurrentTimeMs(0),
+      mVisibleDuration(visibleDuration),
+      mHeight(height),
+      mPadding(padding),
+      mBorder(border)
+  {
+    updateHideTime();
+  }
+  
+  // Sets the time of the most recently played frame.
+  void setCurrentTime(int64_t timeMs) {
+    mCurrentTimeMs = timeMs;
+  }
+  
+  void setStartTime(int64_t timeMs) {
+    mStartTimeMs = timeMs;
+  }
+  
+  void draw(shared_ptr<SDL_Surface>& screen) {
+    if (!isVisible(screen) || !screen) {
+      return;
+    }
+    
+    SDL_Rect border = getBorderRect(screen);
+    unsigned white = SDL_MapRGB(screen->format, 255, 255, 255);
+    int err = SDL_FillRect(screen.get(), &border, white);
+    assert(err == 0);
+    
+    SDL_Rect background = getBackgroundRect(screen);
+    unsigned black = SDL_MapRGB(screen->format, 0, 0, 0);
+    err = SDL_FillRect(screen.get(), &background, black);
+    assert(err == 0);
+    
+    SDL_Rect progress = getProgressRect(screen);
+    unsigned gray = SDL_MapRGB(screen->format, 0xd6, 0xd6, 0xd6);
+    err = SDL_FillRect(screen.get(), &progress, gray);
+    
+    assert(err == 0);
+  }
+  
+  // Returns true if handles/consumes the event, otherwise false.
+  bool handleEvent(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
+    if (event.type == SDL_MOUSEMOTION) {
+      updateHideTime();
+      return true;
+    } else if (event.type == SDL_MOUSEBUTTONDOWN &&
+               event.button.button == SDL_BUTTON_LEFT) {
+      int x = event.button.x;
+      int y = event.button.y;
+      SDL_Rect background = getBackgroundRect(screen);
+      SDL_Rect progress = getProgressRect(screen);
+      if (isInside(x, y, background)) {
+        double progressWidth = background.w - 2 * mBorder;
+        double proportion = (x - progress.x) / progressWidth;
+        double duration = mEndTimeMs - mStartTimeMs;
+        double seekTime = duration * proportion;
+        int64_t seekTimeMs = mStartTimeMs + (int64_t)seekTime;
+        mDecoder.seek(seekTimeMs);
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }  
+  
+private:
+
+  SDL_Rect getBorderRect(shared_ptr<SDL_Surface> screen) {
+    SDL_Rect border;
+    border.x = mPadding;
+    border.y = screen->h - mPadding - mHeight;
+    border.w = screen->w - mPadding * 2;
+    border.h = mHeight;
+    return border;
+  }
+
+  SDL_Rect getBackgroundRect(shared_ptr<SDL_Surface> screen) {
+    SDL_Rect background;
+    background.x = mPadding + mBorder;
+    background.y = screen->h - mPadding - mHeight + mBorder;
+    background.w = screen->w - 2 * mPadding - 2 * mBorder;
+    background.h = mHeight - 2 * mBorder;
+    return background;
+  }
+
+  SDL_Rect getProgressRect(shared_ptr<SDL_Surface> screen) {
+    if (mEndTimeMs == -1) {
+      // Due to a bug in liboggplay, we can't call this before the frames
+      // start coming in, else we'll sometimes deadlock on some files.
+      mEndTimeMs = oggplay_get_duration(mPlayer.get());
+    }
+    double duration = mEndTimeMs - mStartTimeMs;
+    double position = mCurrentTimeMs - mStartTimeMs;
+    SDL_Rect background = getBackgroundRect(screen);
+    double maxWidth = background.w - 2 * mBorder;
+    SDL_Rect progress;
+    progress.x = background.x + mBorder;
+    progress.y = background.y + mBorder;
+    progress.h = background.h - 2 * mBorder;
+    progress.w = max(1, (int)(maxWidth * position / duration));
+    return progress;
+  }
+
+  bool isInside(int x, int y, const SDL_Rect& rect) {
+    return x > rect.x &&
+           x < rect.x + rect.w &&
+           y > rect.y &&
+           y < rect.y + rect.h;
+  }
+
+  bool isVisible(shared_ptr<SDL_Surface> screen) {
+    int x=0, y=0;
+    SDL_GetMouseState(&x, &y);
+    SDL_Rect background = getBackgroundRect(screen);
+    return second_clock::local_time() < mHideTime ||
+           isInside(x, y, background);
+  }
+
+  void updateHideTime() {
+    mHideTime = second_clock::local_time() + mVisibleDuration;
+  }
+
+  shared_ptr<OggPlay> mPlayer;
+  Decoder& mDecoder;
+
+  int64_t mStartTimeMs;
+  int64_t mEndTimeMs;
+  int64_t mCurrentTimeMs;
+
+  // Height of the seek bar, in pixels, including borders, background,
+  // and progress bar.
+  int mHeight;
+  
+  // Number of pixels between bottom and sides of screen and the seek bar.
+  int mPadding;
+  
+  // Thickness of borders in pixels.
+  int mBorder;
+  
+  ptime mHideTime;
+  time_duration mVisibleDuration;
+  
+};
+
 // Process the audio data provided by liboggplay. 'count' is the number of
 // floats contained within 'data'.
 void handle_audio_data(shared_ptr<sa_stream_t> sound, OggPlayAudioData* data, int count) {
@@ -245,6 +494,7 @@ void handle_audio_data(shared_ptr<sa_stream_t> sound, OggPlayAudioData* data, in
 // yuv2rgb routines to test the speed. I'll later provide a switch to use
 // SDL's routines to compare.
 void handle_video_data(shared_ptr<SDL_Surface>& screen, 
+                       SeekBar& seekBar,
                        shared_ptr<Track> video, 
                        OggPlayDataHeader* header) {
   shared_ptr<OggPlay> player(video->mPlayer);
@@ -334,14 +584,17 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
     assert(r == 0);
   }
 
+  seekBar.draw(screen);
+
   r = SDL_Flip(screen.get());
   assert(r == 0);
 }
 
 // Process the RGB(A) video data provided by liboggplay.
 void handle_overlay_data(shared_ptr<SDL_Surface>& screen, 
-                       shared_ptr<Track> video, 
-                       OggPlayDataHeader* header) {
+                         SeekBar& seekBar,
+                         shared_ptr<Track> video, 
+                         OggPlayDataHeader* header) {
   shared_ptr<OggPlay> player(video->mPlayer);
   OggPlayOverlayData* data = oggplay_callback_info_get_overlay_data(header);
 
@@ -368,6 +621,8 @@ void handle_overlay_data(shared_ptr<SDL_Surface>& screen,
                       screen.get(),
                       NULL);
   assert(r == 0);
+
+  seekBar.draw(screen);
 
   r = SDL_Flip(screen.get());
   assert(r == 0);
@@ -396,32 +651,12 @@ bool handle_sdl_event(shared_ptr<SDL_Surface> screen, SDL_Event const& event) {
   switch (event.type) {
     case SDL_KEYDOWN:
       return handle_key_press(screen, event);
-
+    case SDL_QUIT:
+      // Application window was closed.
+      return false;
     default:
       return true;
   }
-}
-
-static bool completed = false;
-
-// Decoding thread. Running the decode loop in a seperate thread avoids the
-// issue where some frames take longer to decode than the time for a frame
-// to be displayed (HD video for example).
-int decode_thread(void* p) {
-  OggPlay* player = (OggPlay*)p;
-
-  // E_OGGPLAY_CONTINUE       = One frame decoded and put in buffer list
-  // E_OGGPLAY_USER_INTERRUPT = One frame decoded, buffer list is now full
-  // E_OGGPLAY_TIMEOUT        = No frames decoded, timed out
-  int r = E_OGGPLAY_TIMEOUT;
-  while (!completed &&
-         r == E_OGGPLAY_TIMEOUT ||
-         r == E_OGGPLAY_USER_INTERRUPT ||
-         r == E_OGGPLAY_CONTINUE) {
-    r = oggplay_step_decoding(player);
-  }
-  completed = true;
-  return 0;
 }
 
 // Play the tracks. Exits when the longest track has completed playing
@@ -467,19 +702,27 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   // TODO: sync vs audio clock
   ptime start(microsec_clock::universal_time());
 
-  completed = false;
-
   // Start the decoding loop in a background thread. The thread must
   // be stopped before this function is exited so that the player
   // object is not being used when it is deleted.
-  SDL_Thread* thread = SDL_CreateThread(decode_thread, player.get());
-  if (!thread)
+  Decoder decoder(player);
+
+  SeekBar seekBar(player, decoder, seconds(5), 10, 10, 1);
+  long first_frame_time = -1;
+
+  if (!decoder.start())
     return;
 
-  while (!completed) {
-    if (SDL_PollEvent(&event) == 1)
-      if (!handle_sdl_event(screen, event))
+  while (!decoder.isCompleted()) {
+    while (SDL_PollEvent(&event) == 1) {
+      if (!seekBar.handleEvent(screen, event) &&
+          !handle_sdl_event(screen, event)) {
+        decoder.setCompleted(true);
         break;
+      }
+    }
+    if (decoder.isCompleted())
+      break;
 
     OggPlayCallbackInfo** info = oggplay_buffer_retrieve_next(player.get());
     if (!info)
@@ -510,10 +753,21 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
           OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[idx]);
           long video_ms = oggplay_callback_info_get_presentation_time(headers[0]);
 
+          if (first_frame_time == -1) {
+            first_frame_time = video_ms;
+            seekBar.setStartTime(first_frame_time);
+          }
+          seekBar.setCurrentTime(video_ms);
+
+          if (decoder.justSeeked()) {
+            first_frame_time = video_ms;
+            start = microsec_clock::universal_time();
+          }
+
           ptime now(microsec_clock::universal_time());
           time_duration duration(now - start);
           long system_ms = duration.total_milliseconds();
-          long diff = video_ms - system_ms;
+          long diff = video_ms - first_frame_time - system_ms;
 
           if (diff > 0) {
             // Need to pause for a bit until it's time for the video frame to appear
@@ -525,10 +779,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
           shared_ptr<Track> track = video;
           if (!track) track = kate;
           if (type == OGGPLAY_YUV_VIDEO) {
-            handle_video_data(screen, track, headers[0]);
+            handle_video_data(screen, seekBar, track, headers[0]);
           }
           else if (type == OGGPLAY_RGBA_VIDEO) {
-            handle_overlay_data(screen, track, headers[0]);
+            printf("handle_overlay_data()\n");
+            handle_overlay_data(screen, seekBar, track, headers[0]);
           }
         }
       }
@@ -546,14 +801,13 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     
     oggplay_buffer_release(player.get(), info);
   } 
-  completed = true;
-  
+ 
   // The decoding thread can be blocked in the call to oggplay_step_decoding.
   // The following call will cause the thread blocked on that function to unblock
   // and exit the decoding loop. We then join to the thread to ensure it has
   // completed before we return so that player object can safely be deleted.
   oggplay_prepare_for_close(player.get());
-  SDL_WaitThread(thread, NULL);
+  decoder.stop();
 }
 
 void usage() {
