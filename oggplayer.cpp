@@ -33,7 +33,9 @@ shared_ptr<T> msp(T* t) {
 // Wrap some of the SDL functionality to help manage resources
 class SDL {
   public:
-    SDL(unsigned long flags = 0) : init_flags(flags), initialized(false), use_sdl_yuv(false) { 
+    SDL(unsigned long flags = 0) : init_flags(flags), initialized(false), use_sdl_yuv(false), fuzz_mode(false) {
+      int r = SDL_Init(init_flags | SDL_INIT_NOPARACHUTE);
+      assert(r == 0);
     }
 
     ~SDL() {
@@ -46,7 +48,7 @@ class SDL {
     shared_ptr<SDL_Surface> setVideoMode(int width,
                                          int height,
                                          unsigned long flags) {
-      int r = SDL_Init(SDL_INIT_VIDEO | init_flags);
+      int r = SDL_InitSubSystem(SDL_INIT_VIDEO);
       assert(r == 0);
       initialized = true;
       return shared_ptr<SDL_Surface>(SDL_SetVideoMode(width, height, 32, flags),
@@ -54,6 +56,7 @@ class SDL {
     }
 
     bool use_sdl_yuv;
+    bool fuzz_mode;
     shared_ptr<SDL_Overlay> yuv_surface;
 
   private:
@@ -506,14 +509,14 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
   r = oggplay_get_video_uv_size(player.get(), video->mIndex, &uv_width, &uv_height);
   assert(r == E_OGGPLAY_OK);
 
-  if (!screen) {
+  if (!screen && !gSDL.fuzz_mode) {
     screen = gSDL.setVideoMode(y_width, y_height, SDL_DOUBLEBUF);
     assert(screen);
   }
 
   OggPlayVideoData* data = oggplay_callback_info_get_video_data(header);
 
-  if (gSDL.use_sdl_yuv) {
+  if (gSDL.use_sdl_yuv && screen) {
     if (!gSDL.yuv_surface) {
       gSDL.yuv_surface = shared_ptr<SDL_Overlay>(
                                                  SDL_CreateYUVOverlay(y_width,
@@ -577,17 +580,21 @@ void handle_video_data(shared_ptr<SDL_Surface>& screen,
                                         SDL_FreeSurface);
     assert(rgb_surface);
 
-    r = SDL_BlitSurface(rgb_surface.get(), 
-                        NULL,
-                        screen.get(),
-                        NULL);
-    assert(r == 0);
+    if (screen) {
+      r = SDL_BlitSurface(rgb_surface.get(), 
+			  NULL,
+			  screen.get(),
+			  NULL);
+      assert(r == 0);
+    }
   }
 
-  seekBar.draw(screen);
+  if (screen) {
+    seekBar.draw(screen);
 
-  r = SDL_Flip(screen.get());
-  assert(r == 0);
+    r = SDL_Flip(screen.get());
+    assert(r == 0);
+  }
 }
 
 // Process the RGB(A) video data provided by liboggplay.
@@ -665,12 +672,11 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
   // Video Surface. We delay creating it until we've decoded some of the
   // video stream so we can get the width/height.
   shared_ptr<SDL_Surface> screen;
-  bool have_sound = false;
 
   // Open an audio stream
   shared_ptr<sa_stream_t> sound(static_cast<sa_stream_t*>(NULL), sa_stream_destroy);
 
-  if (audio) {
+  if (audio && !gSDL.fuzz_mode) {
     sa_stream_t* s;
     int sr = sa_stream_create_pcm(&s,
                                   NULL,
@@ -683,10 +689,7 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
 
     sr = sa_stream_open(sound.get());
     //assert(sr == SA_SUCCESS);
-    if (sr == SA_SUCCESS) {
-      have_sound = true;
-    }
-    else {
+    if (sr != SA_SUCCESS) {
       cerr << "Failed to open sound" << endl;
     }
   }
@@ -733,14 +736,16 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
     assert(!video || video && video->mIndex < num_tracks);
     assert(!kate || kate && kate->mIndex < num_tracks);
 
-    if (have_sound && audio && oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
+    if (audio && oggplay_callback_info_get_type(info[audio->mIndex]) == OGGPLAY_FLOATS_AUDIO) {
       OggPlayDataHeader** headers = oggplay_callback_info_get_headers(info[audio->mIndex]);
       double time = oggplay_callback_info_get_presentation_time(headers[0]) / 1000.0;
       int required = oggplay_callback_info_get_required(info[audio->mIndex]);
       for (int i=0; i<required;++i) {
         int size = oggplay_callback_info_get_record_size(headers[i]);
         OggPlayAudioData* data = oggplay_callback_info_get_audio_data(headers[i]);
-        handle_audio_data(sound, data, size * audio->mChannels);
+        if (sound) {
+          handle_audio_data(sound, data, size * audio->mChannels);
+        }
       }
     }
     
@@ -769,7 +774,7 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
           long system_ms = duration.total_milliseconds();
           long diff = video_ms - first_frame_time - system_ms;
 
-          if (diff > 0) {
+          if (diff > 0 && !gSDL.fuzz_mode) {
             // Need to pause for a bit until it's time for the video frame to appear
             SDL_Delay(diff);
           }
@@ -813,13 +818,14 @@ void play(shared_ptr<OggPlay> player, shared_ptr<VorbisTrack> audio, shared_ptr<
 void usage() {
     cout << "Usage: oggplayer [options] <filename>" << endl;
     cout << "  --sdl-yuv            Use SDL's YUV conversion routines" << endl;
+    cout << "  --fuzz-mode          Disable A/V sync and frame display" << endl;
     cout << "  --video-track <n>    Select which video track to use (-1 to disable)" << endl;
     cout << "  --audio-track <n>    Select which audio track to use (-1 to disable)" << endl;
     cout << "  --kate-track <n>     Select which kate track to use (-1 to disable)" << endl;
     exit(EXIT_FAILURE);
 }
 
-static int parse_track_index_parameter(int argc, const char *argv[], int &n, const char *name, int &idx)
+static int parse_track_index_parameter(int argc, char *argv[], int &n, const char *name, int &idx)
 {
   if (strcmp(argv[n], name) == 0) {
     if (idx == UNSELECTED) {
@@ -835,7 +841,7 @@ static int parse_track_index_parameter(int argc, const char *argv[], int &n, con
   return 1;
 }
 
-int main(int argc, const char* argv[]) {
+int main(int argc, char* argv[]) {
   int video_track = UNSELECTED, audio_track = UNSELECTED, kate_track = UNSELECTED;
 
   if (argc < 2) {
@@ -847,6 +853,9 @@ int main(int argc, const char* argv[]) {
     if (argv[n][0] == '-') {
       if (strcmp(argv[n], "--sdl-yuv") == 0) {
         gSDL.use_sdl_yuv = true;
+      }
+      else if (strcmp(argv[n], "--fuzz-mode") == 0) {
+        gSDL.fuzz_mode = true;
       }
       else if (!parse_track_index_parameter(argc, argv, n, "--video-track", video_track)) {
       }
